@@ -1,0 +1,27 @@
+# mtcp - TcpListener/TcpStream *with* timeout/cancellation support
+# This is free and unencumbered software released into the public domain.
+
+[package]
+name = "mtcp-rs"
+version = "0.1.2"
+edition = "2021"
+license-file = "LICENSE"
+description = "mtcp provides a “blocking” implementation of TcpListener and TcpStream with proper timeout and cancellation support."
+homepage = "https://crates.io/crates/mtcp-rs"
+documentation = "https://docs.rs/mtcp-rs/latest/index.html"
+repository = "https://github.com/dEajL3kA/mtcp"
+readme = "README.md"
+
+[dependencies]
+log = "0.4.17"
+mio = { version = "0.8.5", features = ["os-poll", "net"] }
+
+[dev-dependencies]
+crossbeam-channel = "0.5.6"
+ctrlc = "3.2.4"
+env_logger = "0.10.0"
+lazy_static = "1.4.0"
+regex = "1.7.1"
+
+[[example]]
+name = "mtcp_example"
