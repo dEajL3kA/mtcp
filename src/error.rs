@@ -24,18 +24,18 @@ pub(crate) const ERROR_INCOMPLETE: ConstError = ConstError::of(ErrorKind::Unexpe
 pub enum TcpError {
     /// Indicates that the socket operation was *cancelled* before completion.
     /// Data may have been read or written partially!  
-    /// The [`kind()`](std::io::Error::kind()) of the enclosing
-    /// `std::io::Error` is: **`ErrorKind::Other`**.
+    /// The [`kind()`](std::io::Error::kind()) of this error
+    /// is:&ensp;**`ErrorKind::Other`**
     Cancelled,
     /// Indicates that the socket operation encountered a time-out. Data may
     /// have been read or written partially!  
-    /// The [`kind()`](std::io::Error::kind()) of the enclosing
-    /// `std::io::Error` is: **`ErrorKind::TimedOut`**.
+    /// The [`kind()`](std::io::Error::kind()) of this error
+    /// is:&ensp;**`ErrorKind::TimedOut`**
     TimedOut,
     /// Indicates that the socket operation finished (usually because the
     /// stream was closed) before all data could be read or written.  
-    /// The [`kind()`](std::io::Error::kind()) of the enclosing
-    /// `std::io::Error` is: **`ErrorKind::UnexpectedEof`**.
+    /// The [`kind()`](std::io::Error::kind()) of this error
+    /// is:&ensp;**`ErrorKind::UnexpectedEof`**
     Incomplete,
 }
 

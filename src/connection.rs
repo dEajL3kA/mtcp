@@ -6,7 +6,13 @@ use std::net::SocketAddr;
 
 use mio::net::TcpStream as MioTcpStream;
 
-/// A pending incoming TCP connection, usually used to initialize a new [`mtcp_rs::TcpStream`](crate::TcpStream)
+/// A pending incoming TCP connection, usually used to initialize a new
+/// [`mtcp_rs::TcpStream`](crate::TcpStream)
+/// 
+/// Unlike an `mtcp_rs::TcpStream` instance, the `mtcp_rs::TcpConnection`
+/// instance is **not** yet tied to a
+/// [`mtcp_rs::TcpManager`](crate::TcpManager) instance and can therefore
+/// safely be moved across the thread boundary.
 #[derive(Debug)]
 pub struct TcpConnection {
     stream: MioTcpStream,

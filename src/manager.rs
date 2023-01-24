@@ -5,7 +5,7 @@
 use std::cell::{RefCell, Ref, RefMut};
 use std::io::Result;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 use std::time::Duration;
 
 use mio::{Poll, Events, Token, Waker, Registry};
@@ -35,7 +35,7 @@ thread_local! {
 #[derive(Debug)]
 pub struct TcpManager {
     context: RefCell<TcpPollContext>,
-    cancelled: Flag,
+    cancelled: Arc<Flag>,
 }
 
 #[derive(Debug)]
@@ -55,30 +55,24 @@ impl TcpManager {
     }
 
     pub fn with_capacity(capacity: usize) -> Result<Rc<Self>> {
+        let context = TcpPollContext::new(capacity)?;
+        let waker = Waker::new(context.poll.registry(), SHUTDOWN)?;
         Ok(Rc::new(Self {
-            context: RefCell::new(TcpPollContext::with_capacity(capacity)?),
-            cancelled: Flag::new(),
+            context: RefCell::new(context),
+            cancelled: Arc::new(Flag::new(waker)),
         }))
     }
 
-    pub fn canceller(&self) -> Result<TcpCanceller> {
-        let context = self.context();
-        match Waker::new(context.poll.registry(), SHUTDOWN) {
-            Ok(waker) => Ok(TcpCanceller::new(waker, &self.cancelled)),
-            Err(error) => Err(error),
-        }
-    }
-
-    pub fn shutdown(&self) -> bool {
-        self.cancelled.raise()
-    }
-
-    pub fn restart(&self) -> bool {
-        self.cancelled.clear()
+    pub fn canceller(&self) -> TcpCanceller {
+        TcpCanceller::from(self.cancelled.clone())
     }
 
     pub fn cancelled(&self) -> bool {
         self.cancelled.check()
+    }
+
+    pub fn restart(&self) -> Result<bool> {
+        self.cancelled.clear()
     }
 
     pub(crate) fn context(&self) -> Ref<TcpPollContext> {
@@ -91,7 +85,7 @@ impl TcpManager {
 }
 
 impl TcpPollContext {
-    fn with_capacity(capacity: usize) -> Result<Self> {
+    fn new(capacity: usize) -> Result<Self> {
         Ok(Self {
             poll: Poll::new()?,
             events: Events::with_capacity(capacity),

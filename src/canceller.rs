@@ -3,8 +3,7 @@
  * This is free and unencumbered software released into the public domain.
  */
 use std::io::Result;
-
-use mio::Waker;
+use std::sync::Arc;
 
 use crate::utilities::Flag;
 
@@ -28,26 +27,21 @@ use crate::utilities::Flag;
 /// different error. Newly started operations *are* guaranteed to be cancelled.
 #[derive(Debug)]
 pub struct TcpCanceller {
-    waker: Waker,
-    cancelled: Flag,
+    flag: Arc<Flag>,
 }
 
 impl TcpCanceller {
-    pub(crate) fn new(waker: Waker, cancelled: &Flag) -> Self {
+    pub(crate) fn from(flag: Arc<Flag>) -> Self {
         Self {
-            waker,
-            cancelled: cancelled.clone(),
+            flag,
         }
     }
 
     pub fn cancel(&self) -> Result<bool> {
-        match self.cancelled.raise() {
-            true => self.waker.wake().map(|_| true),
-            false => Ok(false),
-        }
+        self.flag.raise()
     }
 
     pub fn cancelled(&self) -> bool {
-        self.cancelled.check()
+        self.flag.check()
     }
 }

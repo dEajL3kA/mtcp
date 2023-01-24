@@ -22,15 +22,15 @@ use crate::manager::{TcpPollContext};
 /// A TCP socket server, listening for connections, akin to
 /// [`std::net::TcpListener`](std::net::TcpListener)
 ///
-/// All I/O operations provided by `mtcp_rs::TcpListener` are "blocking" by
-/// default, but – unlike the `std::net` implementation – proper ***timeout***
-/// and ***cancellation*** support is available. Each `mtcp_rs::TcpListener` is
-/// tied to an [`mtcp_rs::TcpManager`](crate::TcpManager).
+/// All I/O operations provided by `mtcp_rs::TcpListener` are "blocking", but –
+/// unlike the `std::net` implementation – proper ***timeout*** and
+/// ***cancellation*** support is available. The `mtcp_rs::TcpListener` is tied
+/// to an [`mtcp_rs::TcpManager`](crate::TcpManager) instance.
 /// 
 /// If the `timeout` parameter was set to `Some(Duration)` and if the I/O
 /// operation does **not** complete before the specified timeout period
-/// expires, then the pending I/O operation will fail as soon as possible with
-/// an [`TcpError::TimedOut`](crate::TcpError::TimedOut) error.
+/// expires, then the pending I/O operation will be aborted and fail with an
+/// [`TcpError::TimedOut`](crate::TcpError::TimedOut) error.
 #[derive(Debug)]
 pub struct TcpListener {
     listener: MioTcpListener,

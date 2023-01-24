@@ -29,7 +29,7 @@
 //! current thread must be obtained. Then a new
 //! [`mtcp_rs::TcpListener`](TcpListener) instance can be bound to a local
 //! socket. New incoming connections are returned in the form of
-//! [`mtcp_rs::TcpConnection`](TcpConnection) instances. Usually each
+//! [`mtcp_rs::TcpConnection`](TcpConnection) instances. Usually an
 //! [`mtcp_rs::TcpConnection`](TcpConnection) instance is converted into an
 //! [`mtcp_rs::TcpStream`](TcpStream) for read/write access.
 //! 
@@ -41,7 +41,7 @@
 //! 
 //! # Examples
 //! 
-//! Examples be can found in the `src/examples` directory, or on
+//! Examples be can found in the `examples` sub-directory, or on
 //! [**GitHub**](https://github.com/dEajL3kA/mtcp/tree/master/examples).
 
 mod canceller;

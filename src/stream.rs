@@ -22,21 +22,21 @@ use crate::manager::TcpPollContext;
 /// A TCP stream between a local and a remote socket, akin to
 /// [`std::net::TcpStream`](std::net::TcpStream)
 ///
-/// All I/O operations provided by `mtcp_rs::TcpStream` are "blocking" by
-/// default, but – unlike the `std::net` implementation – proper ***timeout***
-/// and ***cancellation*** support is available. Each `mtcp_rs::TcpStream` is
-/// tied to an [`mtcp_rs::TcpManager`](crate::TcpManager) instance.
+/// All I/O operations provided by `mtcp_rs::TcpStream` are "blocking", but –
+/// unlike the `std::net` implementation – proper ***timeout*** and
+/// ***cancellation*** support is available. The `mtcp_rs::TcpStream` is tied
+/// to an [`mtcp_rs::TcpManager`](crate::TcpManager) instance.
 /// 
-/// A new TCP stream is created by [`connect()`](TcpStream::connect())ing to a
-/// remote host, or initialized [`from()`](TcpStream::from()) an existing
+/// The TCP stream is created by [`connect()`](TcpStream::connect())ing to a
+/// remote host, or directly [`from()`](TcpStream::from()) an existing
 /// [`mtcp_rs::TcpConnection`](crate::TcpConnection).
 /// 
 /// If the `timeout` parameter was set to `Some(Duration)` and if the I/O
 /// operation does **not** complete before the specified timeout period
-/// expires, then the pending I/O operation will fail as soon as possible with
-/// an [`TcpError::TimedOut`](crate::TcpError::TimedOut) error.
+/// expires, then the pending I/O operation will be aborted and fail with an
+/// [`TcpError::TimedOut`](crate::TcpError::TimedOut) error.
 /// 
-/// Function like [`Read::read()`](std::io::Read::read()) and
+/// Functions like [`Read::read()`](std::io::Read::read()) and
 /// [`Write::write()`](std::io::Write::write()), which do **not** have an
 /// explicit `timeout` parameter, *implicitly* use the timeouts that have been
 /// set up via the

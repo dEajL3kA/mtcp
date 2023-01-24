@@ -8,7 +8,7 @@ use std::str;
 use std::thread::{self, ThreadId};
 use std::time::Duration;
 
-use mtcp_rs::{TcpManager, TcpListener, TcpConnection, TcpStream};
+use mtcp_rs::{TcpManager, TcpListener, TcpConnection, TcpStream, TcpError};
 
 use crossbeam_channel::Receiver;
 use lazy_static::lazy_static;
@@ -28,11 +28,12 @@ fn main() {
     let manager = TcpManager::instance().expect("Failed to obtain TcpManager instance!");
 
     /* Register Canceller with Ctrl+C handler */
-    let canceller = manager.canceller().expect("Failed to create a Canceller!");
-    drop(ctrlc::set_handler(move || {
+    let canceller = manager.canceller();
+    ctrlc::set_handler(move || {
         warn!("Shutdown has been requested!");
-        canceller.cancel().expect("Failed to cancel!");
-    }));
+        canceller.cancel().expect("Failed to cancel operation!");
+    })
+    .expect("Failed to register CTRL+C handler!");
 
     /* Bind TcpListener to local socket */
     let listener = TcpListener::bind(&manager, SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8080)).expect("Failed to bin TcpListener!");
@@ -58,7 +59,10 @@ fn main() {
                 }
             },
             Err(error) => {
-                error!("Accept has failed with: {:?}", error);
+                match error.get_ref().and_then(|inner| inner.downcast_ref::<TcpError>()) {
+                    Some(tcp_error) => error!("TcpError: {}", tcp_error),
+                    None => error!("Accept operation has failed: {:?}", error),
+                }
                 break;
             },
         }
