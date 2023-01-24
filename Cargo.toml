@@ -13,6 +13,7 @@ repository = "https://github.com/dEajL3kA/mtcp"
 readme = "README.md"
 
 [dependencies]
+lazy_rc = "0.1.0"
 log = "0.4.17"
 mio = { version = "0.8.5", features = ["os-poll", "net"] }
 

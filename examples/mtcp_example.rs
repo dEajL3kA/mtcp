@@ -28,7 +28,7 @@ fn main() {
     let manager = TcpManager::instance().expect("Failed to obtain TcpManager instance!");
 
     /* Register Canceller with Ctrl+C handler */
-    let canceller = manager.canceller();
+    let canceller = manager.canceller().expect("Failed to create canceller!");
     ctrlc::set_handler(move || {
         warn!("Shutdown has been requested!");
         canceller.cancel().expect("Failed to cancel operation!");

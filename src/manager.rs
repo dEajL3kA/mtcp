@@ -5,17 +5,20 @@
 use std::cell::{RefCell, Ref, RefMut};
 use std::io::Result;
 use std::rc::Rc;
-use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use mio::{Poll, Events, Token, Waker, Registry};
 
-use crate::{TcpCanceller, utilities::{Flag, LazyCell}};
+use lazy_rc::{LazyRc, LazyArc};
+
+use crate::TcpCanceller;
+use crate::utilities::Flag;
 
 const SHUTDOWN: Token = Token(usize::MAX);
 
 thread_local! { 
-    static INSTANCE: LazyCell<TcpManager> = LazyCell::empty();
+    static INSTANCE: LazyRc<TcpManager> = LazyRc::empty();
 }
 
 /// A manager for "shared" resources, used by
@@ -35,7 +38,7 @@ thread_local! {
 #[derive(Debug)]
 pub struct TcpManager {
     context: RefCell<TcpPollContext>,
-    cancelled: Arc<Flag>,
+    cancelled: LazyArc<Flag>,
 }
 
 #[derive(Debug)]
@@ -47,32 +50,33 @@ pub(crate) struct TcpPollContext {
 
 impl TcpManager {
     pub fn instance() -> Result<Rc<Self>> {
-        INSTANCE.with(|val| val.or_init_with(Self::new))
+        INSTANCE.with(|val| val.or_try_init_with(Self::new))
     }
 
-    pub fn new() -> Result<Rc<Self>> {
+    pub fn new() -> Result<Self> {
         Self::with_capacity(128)
     }
 
-    pub fn with_capacity(capacity: usize) -> Result<Rc<Self>> {
+    pub fn with_capacity(capacity: usize) -> Result<Self> {
         let context = TcpPollContext::new(capacity)?;
-        let waker = Waker::new(context.poll.registry(), SHUTDOWN)?;
-        Ok(Rc::new(Self {
+        Ok(Self {
             context: RefCell::new(context),
-            cancelled: Arc::new(Flag::new(waker)),
-        }))
+            cancelled: LazyArc::empty(),
+        })
     }
 
-    pub fn canceller(&self) -> TcpCanceller {
-        TcpCanceller::from(self.cancelled.clone())
+    pub fn canceller(&self) -> Result<TcpCanceller> {
+        self.cancelled
+            .or_try_init_with(|| Ok(Flag::new(Waker::new(self.context().poll.registry(), SHUTDOWN)?)))
+            .map(TcpCanceller::from)
     }
 
     pub fn cancelled(&self) -> bool {
-        self.cancelled.check()
+        self.cancelled.map(|flag| flag.check()).unwrap_or(false)
     }
 
     pub fn restart(&self) -> Result<bool> {
-        self.cancelled.clear()
+        self.cancelled.map(|flag| flag.clear()).unwrap_or(Ok(false))
     }
 
     pub(crate) fn context(&self) -> Ref<TcpPollContext> {
