@@ -68,6 +68,14 @@ impl TcpStream {
         self.timeouts = (timeout_rd, timeout_wr);
     }
 
+    pub fn peer_addr(&self) -> Option<SocketAddr> {
+        self.stream.peer_addr().ok()
+    }
+
+    pub fn local_addr(&self) -> Option<SocketAddr> {
+        self.stream.local_addr().ok()
+    }
+
     pub fn shutdown(&self, how: Shutdown) -> Result<()> {
         self.stream.shutdown(how)
     }
@@ -99,19 +107,9 @@ impl TcpStream {
             return ERROR_CANCELLED.result();
         }
 
-        let manager = manager.clone();
         let mut stream = MioTcpStream::connect(addr)?;
-        let token;
-
-        {
-            let mut context = manager.context_mut();
-            token = Self::register(&context, &mut stream)?;
-
-            if let Err(error) = Self::await_connected(&manager, &mut context, &mut stream, token, timeout) {
-                Self::deregister(&context, &mut stream);
-                return Err(error);
-            }    
-        }
+        let manager = manager.clone();
+        let token = Self::init_connection(&manager, &mut stream, timeout)?;
 
         Ok(Self {
             stream,
@@ -119,6 +117,19 @@ impl TcpStream {
             timeouts: (None, None),
             manager,
         })
+    }
+
+    fn init_connection(manager: &Rc<TcpManager>, stream: &mut MioTcpStream, timeout: Option<Duration>) -> Result<Token> {
+        let mut context = manager.context_mut();
+        let token = Self::register(&context, stream)?;
+
+        match Self::await_connected(&manager, &mut context, stream, token, timeout) {
+            Ok(_) => Ok(token),
+            Err(error) => {
+                Self::deregister(&context, stream);
+                Err(error)
+            },
+        }
     }
 
     fn await_connected<T>(manager: &Rc<TcpManager>, context: &mut T, stream: &mut MioTcpStream, token: Token, timeout: Option<Duration>) -> Result<()>

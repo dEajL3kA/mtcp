@@ -15,6 +15,7 @@ use lazy_static::lazy_static;
 use log::{info, warn, error};
 use regex::bytes::Regex;
 
+const PORT_NUMBER: u16 = 8080;
 const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn main() {
@@ -36,7 +37,7 @@ fn main() {
     .expect("Failed to register CTRL+C handler!");
 
     /* Bind TcpListener to local socket */
-    let listener = TcpListener::bind(&manager, SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8080)).expect("Failed to bin TcpListener!");
+    let listener = TcpListener::bind(&manager, SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), PORT_NUMBER)).expect("Failed to bin TcpListener!");
 
     /* Create Crossbeam channel */
     let (channel_tx, channel_rx) = crossbeam_channel::bounded::<TcpConnection>(256);
@@ -114,7 +115,7 @@ fn handle_request(mut stream: TcpStream, buffer: &mut Vec<u8>, thread_id: Thread
     }
 
     /* Write response */
-    let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\nHello!\r\n";
+    let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<!DOCTYPE html>\r\n<title>Hello</title><h1>Hello world!</h1>";
     if let Err(error) = stream.write_all_timeout(response.as_bytes(), Some(Duration::from_secs(15))) {
         error!("[{:?}] Failed to write response: {:?}", thread_id, error);
     }
@@ -125,7 +126,7 @@ fn handle_request(mut stream: TcpStream, buffer: &mut Vec<u8>, thread_id: Thread
 
 fn end_of_message(buffer: &[u8]) -> bool {
     lazy_static! {
-        static ref END_OF_MESSAGE: Regex = Regex::new(r"\r\n\r\n").expect("Failed to create regular expression!");
+        static ref END_OF_MESSAGE: Regex = Regex::new(r"\r\n\r\n").expect("Failed to create regex!");
     }
     END_OF_MESSAGE.is_match(buffer)
 }
