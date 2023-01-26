@@ -57,9 +57,11 @@ fn connect(manager: &Rc<TcpManager>, ip_addr: std::net::IpAddr, hostname: &str) 
             stream /* connected successfully */
         },
         Err(error) => {
-            match error.get_ref().and_then(|inner| inner.downcast_ref::<TcpError>()) {
-                Some(tcp_error) => error!("TcpError: {}", tcp_error),
-                None => error!("Connect operation has failed: {:?}", error),
+            match error {
+                TcpError::Cancelled=> error!("Connect operation was cancelled!"),
+                TcpError::TimedOut => error!("Connect operation timed out!"),
+                TcpError::Incomplete => error!("Connect operation is incomplete!"),
+                TcpError::Failed(inner) => error!("Connect operation failed: {:?}", inner),
             }
             return;
         },
@@ -71,9 +73,11 @@ fn connect(manager: &Rc<TcpManager>, ip_addr: std::net::IpAddr, hostname: &str) 
     match stream.write_all_timeout(&request.into_bytes()[..], Some(Duration::from_secs(15))) {
         Ok(_) => (),
         Err(error) => {
-            match error.get_ref().and_then(|inner| inner.downcast_ref::<TcpError>()) {
-                Some(tcp_error) => error!("TcpError: {}", tcp_error),
-                None => error!("Write operation has failed: {:?}", error),
+            match error {
+                TcpError::Cancelled=> error!("Write operation was cancelled!"),
+                TcpError::TimedOut => error!("Write operation timed out!"),
+                TcpError::Incomplete => error!("Write operation is incomplete!"),
+                TcpError::Failed(inner) => error!("Write operation failed: {:?}", inner),
             }
             return;
         },
@@ -84,12 +88,11 @@ fn connect(manager: &Rc<TcpManager>, ip_addr: std::net::IpAddr, hostname: &str) 
     let mut buffer = Vec::with_capacity(4096);
     match stream.read_all_timeout(&mut buffer, Some(Duration::from_secs(15)), NonZeroUsize::new(4096), end_of_message) {
         Ok(_) => info!("Response: {:?}", str::from_utf8(&buffer[..])),
-        Err(error) => {
-            match error.get_ref().and_then(|inner| inner.downcast_ref::<TcpError>()) {
-                Some(tcp_error) => error!("TcpError: {}", tcp_error),
-                None => error!("Write operation has failed: {:?}", error),
-            }
-            return;
+        Err(error) => match error {
+            TcpError::Cancelled=> error!("Read operation was cancelled!"),
+            TcpError::TimedOut => error!("Read operation timed out!"),
+            TcpError::Incomplete => error!("Read operation is incomplete!"),
+            TcpError::Failed(inner) => error!("Read operation failed: {:?}", inner),
         },
     }
 }

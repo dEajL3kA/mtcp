@@ -4,11 +4,7 @@
  */
 use std::error::Error;
 use std::fmt::{Display, Debug, Formatter};
-use std::io::{ErrorKind, Error as IoError, Result as IoResult};
-
-pub(crate) const ERROR_CANCELLED:  ConstError = ConstError::of(ErrorKind::Other,         TcpError::Cancelled);
-pub(crate) const ERROR_TIMEDOUT:   ConstError = ConstError::of(ErrorKind::TimedOut,      TcpError::TimedOut);
-pub(crate) const ERROR_INCOMPLETE: ConstError = ConstError::of(ErrorKind::UnexpectedEof, TcpError::Incomplete);
+use std::io::{ErrorKind, Error as IoError};
 
 /// The error type for **mtcp** I/O operations
 /// 
@@ -20,46 +16,22 @@ pub(crate) const ERROR_INCOMPLETE: ConstError = ConstError::of(ErrorKind::Unexpe
 /// Errors from the **`mio`** layer are passed through "as-is"; do **not**
 /// expect that an "inner" `mtcp_rs::TcpError` is always available!
 
-#[derive(Copy, Clone)]
 pub enum TcpError {
     /// Indicates that the socket operation was *cancelled* before completion.
-    /// Data may have been read or written partially!  
-    /// The [`kind()`](std::io::Error::kind()) of this error
-    /// is:&ensp;**`ErrorKind::Other`**
+    /// Data may have been read or written partially!
     Cancelled,
     /// Indicates that the socket operation encountered a time-out. Data may
-    /// have been read or written partially!  
-    /// The [`kind()`](std::io::Error::kind()) of this error
-    /// is:&ensp;**`ErrorKind::TimedOut`**
+    /// have been read or written partially!
     TimedOut,
     /// Indicates that the socket operation finished (usually because the
-    /// stream was closed) before all data could be read or written.  
-    /// The [`kind()`](std::io::Error::kind()) of this error
-    /// is:&ensp;**`ErrorKind::UnexpectedEof`**
+    /// stream was closed) before all data could be read or written.
     Incomplete,
+    /// Indicates that the socket operation failed. More detailed information
+    /// is available via the enclosed [`std::io::Error`](std::io::Error).
+    Failed(IoError)
 }
 
-pub(crate) struct ConstError {
-    kind: ErrorKind,
-    tcp_error: TcpError,
-}
-
-impl ConstError {
-    const fn of(kind: ErrorKind, tcp_error: TcpError) -> Self {
-        Self {
-            kind,
-            tcp_error,
-        }
-    }
-    
-    pub fn error(&self) -> IoError {
-        IoError::new(self.kind, self.tcp_error)
-    }
-
-    pub fn result<T>(&self) -> IoResult<T> {
-        Err(self.error())
-    }
-}
+impl Error for TcpError { }
 
 impl Debug for TcpError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -67,6 +39,7 @@ impl Debug for TcpError {
             Self::Cancelled => write!(f, "TcpError::Cancelled"),
             Self::TimedOut => write!(f, "TcpError::TimedOut"),
             Self::Incomplete => write!(f, "TcpError::Incomplete"),
+            Self::Failed(error) => write!(f, "TcpError::Failed({:?})", error),
         }
     }
 }
@@ -74,11 +47,38 @@ impl Debug for TcpError {
 impl Display for TcpError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            TcpError::Cancelled => write!(f, "The TCP socket operation was cancelled!"),
-            TcpError::TimedOut => write!(f, "The TCP socket operation timed out!"),
-            TcpError::Incomplete => write!(f, "The TCP socket operation is incomplete!"),
+            Self::Cancelled => write!(f, "The TCP socket operation was cancelled!"),
+            Self::TimedOut => write!(f, "The TCP socket operation timed out!"),
+            Self::Incomplete => write!(f, "The TCP socket operation is incomplete!"),
+            Self::Failed(error) => write!(f, "{}", error),
         }
     }
 }
 
-impl Error for TcpError { }
+impl From<TcpError> for IoError {
+    fn from(value: TcpError) -> Self {
+        match value {
+            TcpError::Failed(error) => error,
+            other => IoError::new(ErrorKind::Other, other),
+        }
+    }
+}
+
+impl From<IoError> for TcpError {
+    fn from(value: IoError) -> Self {
+        match try_downcast_error(value) {
+            Ok(error) => error,
+            Err(other) => TcpError::Failed(other),
+        }
+    }
+}
+
+fn try_downcast_error<T>(error: IoError) -> Result<T, IoError>
+where
+    T: Error + Send + Sync + 'static,
+{
+    match error.get_ref().map(|inner| inner.is::<T>()) {
+        Some(true) => Ok(*error.into_inner().unwrap().downcast::<T>().unwrap()),
+        _ => Err(error),
+    }
+}

@@ -44,7 +44,7 @@ fn main() {
 
     /* Create some worker threads to handle connections */
     let mut threads = Vec::new();
-    for _n in 0..5 {
+    for _n in 0..0 {
         let thread_receiver = channel_rx.clone();
         threads.push(thread::spawn(move || thread_worker(thread_receiver)));
     }
@@ -60,11 +60,13 @@ fn main() {
                 }
             },
             Err(error) => {
-                match error.get_ref().and_then(|inner| inner.downcast_ref::<TcpError>()) {
-                    Some(tcp_error) => error!("TcpError: {}", tcp_error),
-                    None => error!("Accept operation has failed: {:?}", error),
+                match error {
+                    TcpError::Cancelled=> error!("Accept operation was cancelled!"),
+                    TcpError::TimedOut => error!("Accept operation timed out!"),
+                    TcpError::Incomplete => error!("Accept operation is incomplete!"),
+                    TcpError::Failed(inner) => error!("Accept operation failed: {:?}", inner),
                 }
-                break;
+                break; /*stop server after an error was encountered */
             },
         }
     }
@@ -109,7 +111,12 @@ fn handle_request(mut stream: TcpStream, buffer: &mut Vec<u8>, thread_id: Thread
             info!("[{:?}] Request: {:?}", thread_id, request_str);
         },
         Err(error) => {
-            warn!("[{:?}] The read operation has failed: {:?}", thread_id, error);
+            match error {
+                TcpError::Cancelled=> error!("Read operation was cancelled!"),
+                TcpError::TimedOut => error!("Read operation timed out!"),
+                TcpError::Incomplete => error!("Read operation is incomplete!"),
+                TcpError::Failed(inner) => error!("Read operation failed: {:?}", inner),
+            }
             return;
         }
     }
@@ -117,7 +124,12 @@ fn handle_request(mut stream: TcpStream, buffer: &mut Vec<u8>, thread_id: Thread
     /* Write response */
     let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<!DOCTYPE html>\r\n<title>Hello</title><h1>Hello world!</h1>";
     if let Err(error) = stream.write_all_timeout(response.as_bytes(), Some(Duration::from_secs(15))) {
-        error!("[{:?}] Failed to write response: {:?}", thread_id, error);
+        match error {
+            TcpError::Cancelled=> error!("Write operation was cancelled!"),
+            TcpError::TimedOut => error!("Write operation timed out!"),
+            TcpError::Incomplete => error!("Write operation is incomplete!"),
+            TcpError::Failed(inner) => error!("Write operation failed: {:?}", inner),
+        }
     }
 
     /* Clear the buffer for next time */

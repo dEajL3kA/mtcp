@@ -2,7 +2,7 @@
  * mtcp - TcpListener/TcpStream *with* timeout/cancellation support
  * This is free and unencumbered software released into the public domain.
  */
-use std::io::{Read, Write, Result, ErrorKind};
+use std::io::{Read, Write, Result as IoResult, ErrorKind};
 use std::net::{SocketAddr, Shutdown};
 use std::num::NonZeroUsize;
 use std::ops::{Deref, DerefMut};
@@ -14,9 +14,8 @@ use mio::net::TcpStream as MioTcpStream;
 
 use log::warn;
 
-use crate::utilities::{compute_remaining_time, set_up_timeout};
-use crate::{TcpConnection, TcpManager};
-use crate::error::{ERROR_CANCELLED, ERROR_TIMEDOUT, ERROR_INCOMPLETE};
+use crate::utilities::Timeout;
+use crate::{TcpConnection, TcpManager, TcpError};
 use crate::manager::TcpPollContext;
 
 /// A TCP stream between a local and a remote socket, akin to
@@ -51,7 +50,7 @@ pub struct TcpStream {
 }
 
 impl TcpStream {
-    pub fn from(manager: &Rc<TcpManager>, connection: TcpConnection) -> Result<Self> {
+    pub fn from(manager: &Rc<TcpManager>, connection: TcpConnection) -> IoResult<Self> {
         let mut stream = connection.stream();
         let manager = manager.clone();
         let token = Self::register(&manager.context(), &mut stream)?;
@@ -76,11 +75,11 @@ impl TcpStream {
         self.stream.local_addr().ok()
     }
 
-    pub fn shutdown(&self, how: Shutdown) -> Result<()> {
+    pub fn shutdown(&self, how: Shutdown) -> IoResult<()> {
         self.stream.shutdown(how)
     }
 
-    fn register<T>(context: &T, stream: &mut MioTcpStream) -> Result<Token>
+    fn register<T>(context: &T, stream: &mut MioTcpStream) -> IoResult<Token>
     where
         T: Deref<Target=TcpPollContext>
     {
@@ -102,9 +101,9 @@ impl TcpStream {
     // Connect functions
     // ~~~~~~~~~~~~~~~~~~~~~~~
 
-    pub fn connect(manager: &Rc<TcpManager>, addr: SocketAddr, timeout: Option<Duration>) -> Result<Self> {
+    pub fn connect(manager: &Rc<TcpManager>, addr: SocketAddr, timeout: Option<Duration>) -> Result<Self, TcpError> {
         if manager.cancelled() {
-            return ERROR_CANCELLED.result();
+            return Err(TcpError::Cancelled);
         }
 
         let mut stream = MioTcpStream::connect(addr)?;
@@ -119,11 +118,11 @@ impl TcpStream {
         })
     }
 
-    fn init_connection(manager: &Rc<TcpManager>, stream: &mut MioTcpStream, timeout: Option<Duration>) -> Result<Token> {
+    fn init_connection(manager: &Rc<TcpManager>, stream: &mut MioTcpStream, timeout: Option<Duration>) -> Result<Token, TcpError> {
         let mut context = manager.context_mut();
         let token = Self::register(&context, stream)?;
 
-        match Self::await_connected(&manager, &mut context, stream, token, timeout) {
+        match Self::await_connected(manager, &mut context, stream, token, timeout) {
             Ok(_) => Ok(token),
             Err(error) => {
                 Self::deregister(&context, stream);
@@ -132,36 +131,36 @@ impl TcpStream {
         }
     }
 
-    fn await_connected<T>(manager: &Rc<TcpManager>, context: &mut T, stream: &mut MioTcpStream, token: Token, timeout: Option<Duration>) -> Result<()>
+    fn await_connected<T>(manager: &Rc<TcpManager>, context: &mut T, stream: &mut MioTcpStream, token: Token, timeout: Option<Duration>) -> Result<(), TcpError>
     where
         T: DerefMut<Target=TcpPollContext>
     {
-        let timeout = set_up_timeout(timeout);
+        let timeout = Timeout::start(timeout);
 
         loop {
-            let remaining = timeout.map(compute_remaining_time);
+            let remaining = timeout.remaining_time();
             match context.poll(remaining) {
                 Ok(events) => {
                     for _event in events.iter().filter(|event| (event.token() == token)) {
                         match Self::event_conn(stream) {
                             Ok(true) => return Ok(()),
                             Ok(_) => (),
-                            Err(error) => return Err(error),
+                            Err(error) => return Err(error.into()),
                         }
                     }
                 },
-                Err(error) => return Err(error),
+                Err(error) => return Err(error.into()),
             }
             if manager.cancelled() {
-                return ERROR_CANCELLED.result();
+                return Err(TcpError::Cancelled);
             }
             if remaining.map(|time| time.is_zero()).unwrap_or(false) {
-                return ERROR_TIMEDOUT.result();
+                return Err(TcpError::TimedOut);
             }
         }
     }
 
-    fn event_conn(stream: &mut MioTcpStream) -> Result<bool> {
+    fn event_conn(stream: &mut MioTcpStream) -> IoResult<bool> {
         loop {
             if let Some(err) = stream.take_error()? {
                 return Err(err);
@@ -181,56 +180,56 @@ impl TcpStream {
     // Read functions
     // ~~~~~~~~~~~~~~~~~~~~~~~
 
-    pub fn read_timeout(&mut self, buffer: &mut [u8], timeout: Option<Duration>) -> Result<usize> {
+    pub fn read_timeout(&mut self, buffer: &mut [u8], timeout: Option<Duration>) -> Result<usize, TcpError> {
         if self.manager.cancelled() {
-            return ERROR_CANCELLED.result();
+            return Err(TcpError::Cancelled);
         }
 
-        let timeout = set_up_timeout(timeout);
+        let timeout = Timeout::start(timeout);
 
         match Self::event_read(&mut self.stream, buffer) {
             Ok(Some(len)) => return Ok(len),
             Ok(_) => (),
-            Err(error) => return Err(error),
+            Err(error) => return Err(error.into()),
         }
 
         let mut context = self.manager.context_mut();
 
         loop {
-            let remaining = timeout.map(compute_remaining_time);
+            let remaining = timeout.remaining_time();
             match context.poll(remaining) {
                 Ok(events) => {
                     for _event in events.iter().filter(|event| (event.token() == self.token) && event.is_readable()) {
                         match Self::event_read(&mut self.stream, buffer) {
                             Ok(Some(len)) => return Ok(len),
                             Ok(_) => (),
-                            Err(error) => return Err(error),
+                            Err(error) => return Err(error.into()),
                         }
                     }
                 },
-                Err(error) => return Err(error),
+                Err(error) => return Err(error.into()),
             }
             if self.manager.cancelled() {
-                return ERROR_CANCELLED.result();
+                return Err(TcpError::Cancelled);
             }
             if remaining.map(|time| time.is_zero()).unwrap_or(false) {
-                return ERROR_TIMEDOUT.result();
+                return Err(TcpError::TimedOut);
             }
         }
     }
 
-    pub fn read_all_timeout<F>(&mut self, buffer: &mut Vec<u8>, timeout: Option<Duration>, chunk_size: Option<NonZeroUsize>, fn_complete: F) -> Result<()>
+    pub fn read_all_timeout<F>(&mut self, buffer: &mut Vec<u8>, timeout: Option<Duration>, chunk_size: Option<NonZeroUsize>, fn_complete: F) -> Result<(), TcpError>
     where
         F: Fn(&[u8]) -> bool,
     {
-        let timeout = set_up_timeout(timeout);
+        let timeout = Timeout::start(timeout);
         let chunk_size = chunk_size.map(NonZeroUsize::get).unwrap_or(4096);
         let mut valid_length = buffer.len();
 
         loop {
             buffer.resize(compute_capacity(valid_length, chunk_size), 0);
-            let done = match self.read_timeout(&mut buffer[valid_length..], timeout.map(compute_remaining_time)) {
-                Ok(0) => Some(ERROR_INCOMPLETE.result()),
+            let done = match self.read_timeout(&mut buffer[valid_length..], timeout.remaining_time()) {
+                Ok(0) => Some(Err(TcpError::Incomplete)),
                 Ok(count) => {
                     valid_length += count;
                     match fn_complete(&buffer[..valid_length]) {
@@ -247,7 +246,7 @@ impl TcpStream {
         }
     }
 
-    fn event_read(stream: &mut MioTcpStream, buffer: &mut [u8]) -> Result<Option<usize>> {
+    fn event_read(stream: &mut MioTcpStream, buffer: &mut [u8]) -> IoResult<Option<usize>> {
         loop {
             match stream.read(buffer) {
                 Ok(count) => return Ok(Some(count)),
@@ -264,50 +263,50 @@ impl TcpStream {
     // Write functions
     // ~~~~~~~~~~~~~~~~~~~~~~~
 
-    pub fn write_timeout(&mut self, buffer: &[u8], timeout: Option<Duration>) -> Result<usize> {
+    pub fn write_timeout(&mut self, buffer: &[u8], timeout: Option<Duration>) -> Result<usize, TcpError> {
         if self.manager.cancelled() {
-            return ERROR_CANCELLED.result();
+            return Err(TcpError::Cancelled);
         }
 
-        let timeout = set_up_timeout(timeout);
+        let timeout = Timeout::start(timeout);
 
         match Self::event_write(&mut self.stream, buffer) {
             Ok(Some(len)) => return Ok(len),
             Ok(_) => (),
-            Err(error) => return Err(error),
+            Err(error) => return Err(error.into()),
         }
 
         let mut context = self.manager.context_mut();
 
         loop {
-            let remaining = timeout.map(compute_remaining_time);
+            let remaining = timeout.remaining_time();
             match context.poll(remaining) {
                 Ok(events) => {
                     for _event in events.iter().filter(|event| (event.token() == self.token) && event.is_writable()) {
                         match Self::event_write(&mut self.stream, buffer) {
                             Ok(Some(len)) => return Ok(len),
                             Ok(_) => (),
-                            Err(error) => return Err(error),
+                            Err(error) => return Err(error.into()),
                         }
                     }
                 },
-                Err(error) => return Err(error),
+                Err(error) => return Err(error.into()),
             }
             if self.manager.cancelled() {
-                return ERROR_CANCELLED.result();
+                return Err(TcpError::Cancelled);
             }
             if remaining.map(|time| time.is_zero()).unwrap_or(false) {
-                return ERROR_TIMEDOUT.result();
+                return Err(TcpError::TimedOut);
             }
         }
     }
 
-    pub fn write_all_timeout(&mut self, mut buffer: &[u8], timeout: Option<Duration>) -> Result<()> {
-        let timeout = set_up_timeout(timeout);
+    pub fn write_all_timeout(&mut self, mut buffer: &[u8], timeout: Option<Duration>) -> Result<(), TcpError> {
+        let timeout = Timeout::start(timeout);
 
         loop {
-            match self.write_timeout(&buffer[..], timeout.map(compute_remaining_time)) {
-                Ok(0) => return ERROR_INCOMPLETE.result(),
+            match self.write_timeout(buffer, timeout.remaining_time()) {
+                Ok(0) => return Err(TcpError::Incomplete),
                 Ok(count) => {
                     buffer = &buffer[count..];
                     if buffer.is_empty() { return Ok(()); }
@@ -317,7 +316,7 @@ impl TcpStream {
         }
     }
 
-    fn event_write(stream: &mut MioTcpStream, buffer: &[u8]) -> Result<Option<usize>> {
+    fn event_write(stream: &mut MioTcpStream, buffer: &[u8]) -> IoResult<Option<usize>> {
         loop {
             match stream.write(buffer) {
                 Ok(count) => return Ok(Some(count)),
@@ -332,17 +331,17 @@ impl TcpStream {
 }
 
 impl Read for TcpStream {
-    fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
-        self.read_timeout(buf, self.timeouts.0)
+    fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
+        into_io_result(self.read_timeout(buf, self.timeouts.0))
     }
 }
 
 impl Write for TcpStream {
-    fn write(&mut self, buf: &[u8]) -> Result<usize> {
-        self.write_timeout(buf, self.timeouts.1)
+    fn write(&mut self, buf: &[u8]) -> IoResult<usize> {
+        into_io_result(self.write_timeout(buf, self.timeouts.1))
     }
 
-    fn flush(&mut self) -> Result<()> {
+    fn flush(&mut self) -> IoResult<()> {
         self.stream.flush()
     }
 }
@@ -351,6 +350,13 @@ impl Drop for TcpStream {
     fn drop(&mut self) {
         let context = self.manager.context();
         Self::deregister(&context, &mut self.stream);
+    }
+}
+
+fn into_io_result<T>(result: Result<T, TcpError>) -> IoResult<T> {
+    match result {
+        Ok(value) => Ok(value),
+        Err(error) => Err(error.into()),
     }
 }
 

@@ -4,7 +4,7 @@
  */
 
 use std::cell::Ref;
-use std::io::{Result, ErrorKind};
+use std::io::{Result as IoResult, ErrorKind};
 use std::net::SocketAddr;
 use std::rc::Rc;
 use std::time::Duration;
@@ -14,9 +14,8 @@ use mio::net::TcpListener as MioTcpListener;
 
 use log::warn;
 
-use crate::utilities::{set_up_timeout, compute_remaining_time};
-use crate::{TcpConnection, TcpManager};
-use crate::error::{ERROR_CANCELLED, ERROR_TIMEDOUT};
+use crate::utilities::Timeout;
+use crate::{TcpConnection, TcpManager, TcpError};
 use crate::manager::{TcpPollContext};
 
 /// A TCP socket server, listening for connections, akin to
@@ -39,7 +38,7 @@ pub struct TcpListener {
 }
 
 impl TcpListener {
-    pub fn bind(manager: &Rc<TcpManager>, addr: SocketAddr) -> Result<Self> {
+    pub fn bind(manager: &Rc<TcpManager>, addr: SocketAddr) -> IoResult<Self> {
         let manager = manager.clone();
         let (listener, token) = Self::initialize(manager.context(), addr)?;
 
@@ -50,52 +49,52 @@ impl TcpListener {
         })
     }
 
-    fn initialize(context: Ref<TcpPollContext>, addr: SocketAddr) -> Result<(MioTcpListener, Token)> {
+    fn initialize(context: Ref<TcpPollContext>, addr: SocketAddr) -> IoResult<(MioTcpListener, Token)> {
         let mut listener = MioTcpListener::bind(addr)?;
         let token = context.token();
         context.registry().register(&mut listener, token, Interest::READABLE)?;
         Ok((listener, token))
     }
 
-    pub fn accept(&self, timeout: Option<Duration>) -> Result<TcpConnection> {
+    pub fn accept(&self, timeout: Option<Duration>) -> Result<TcpConnection, TcpError> {
         if self.manager.cancelled() {
-            return ERROR_CANCELLED.result();
+            return Err(TcpError::Cancelled);
         }
 
-        let timeout = set_up_timeout(timeout);
+        let timeout = Timeout::start(timeout);
 
         match Self::event_accept(&self.listener) {
             Ok(Some(connection)) => return Ok(connection),
             Ok(_) => (),
-            Err(error) => return Err(error),
+            Err(error) => return Err(error.into()),
         }
 
         let mut context = self.manager.context_mut();
 
         loop {
-            let remaining = timeout.map(compute_remaining_time);
+            let remaining = timeout.remaining_time();
             match context.poll(remaining) {
                 Ok(events) => {
                     for _event in events.iter().filter(|event| event.token() == self.token) {
                         match Self::event_accept(&self.listener) {
                             Ok(Some(connection)) => return Ok(connection),
                             Ok(_) => (),
-                            Err(error) => return Err(error),
+                            Err(error) => return Err(error.into()),
                         }
                     }
                 },
-                Err(error) => return Err(error),
+                Err(error) => return Err(error.into()),
             }
             if self.manager.cancelled() {
-                return ERROR_CANCELLED.result();
+                return Err(TcpError::Cancelled);
             }
             if remaining.map(|time| time.is_zero()).unwrap_or(false) {
-                return ERROR_TIMEDOUT.result();
+                return Err(TcpError::TimedOut);
             }
         }
     }
 
-    fn event_accept(listener: &MioTcpListener) -> Result<Option<TcpConnection>> {
+    fn event_accept(listener: &MioTcpListener) -> IoResult<Option<TcpConnection>> {
         loop {
             match listener.accept() {
                 Ok((stream, _addr)) => return Ok(Some(TcpConnection::new(stream))),
