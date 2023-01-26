@@ -3,7 +3,7 @@
  * This is free and unencumbered software released into the public domain.
  */
 use std::cell::{RefCell, Ref, RefMut};
-use std::io::Result;
+use std::io::{Result, ErrorKind};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -107,8 +107,16 @@ impl TcpPollContext {
     }
 
     pub fn poll(&mut self, timeout: Option<Duration>) -> Result<&Events>{
-        self.poll.poll(&mut self.events, timeout)?;
-        Ok(&self.events)
+        loop {
+            match self.poll.poll(&mut self.events, timeout) {
+                Ok(_) => return Ok(&self.events),
+                Err(error) => {
+                    if error.kind() != ErrorKind::Interrupted {
+                        return Err(error);
+                    }
+                },
+            }
+        }
     }
 
     pub fn registry(&self) -> &Registry {
