@@ -41,7 +41,10 @@ fn main() {
     .expect("Failed to register CTRL+C handler!");
 
     /* Bind TcpListener to local socket */
-    let listener = TcpListener::bind(&manager, SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), PORT_NUMBER)).expect("Failed to bin TcpListener!");
+    let listener = match TcpListener::bind(&manager, SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), PORT_NUMBER)) {
+        Ok(value) => value,
+        Err(error) => return error!("Failed to bind TcpListener: {:?}", error),
+    };
 
     /* Create Crossbeam channel */
     let (channel_tx, channel_rx) = crossbeam_channel::bounded::<TcpConnection>(256);
