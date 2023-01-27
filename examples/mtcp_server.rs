@@ -5,6 +5,7 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::num::NonZeroUsize;
 use std::str;
+use std::sync::Arc;
 use std::thread::{self, ThreadId};
 use std::time::Duration;
 
@@ -12,8 +13,11 @@ use mtcp_rs::{TcpManager, TcpListener, TcpConnection, TcpStream, TcpError};
 
 use crossbeam_channel::Receiver;
 use lazy_static::lazy_static;
+use lazy_rc::LazyArc;
 use log::{info, warn, error};
 use regex::bytes::Regex;
+
+static CPU_COUNT: LazyArc<usize> = LazyArc::empty();
 
 const PORT_NUMBER: u16 = 8080;
 const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -42,9 +46,12 @@ fn main() {
     /* Create Crossbeam channel */
     let (channel_tx, channel_rx) = crossbeam_channel::bounded::<TcpConnection>(256);
 
-    /* Create some worker threads to handle connections */
-    let mut threads = Vec::new();
-    for _n in 0..0 {
+    /* Detect number of processors */
+    let cpu_count = cpu_count();
+
+    /* Create some worker threads to handle incoming connections */
+    let mut threads = Vec::with_capacity(*cpu_count);
+    for _n in 0..(*cpu_count) {
         let thread_receiver = channel_rx.clone();
         threads.push(thread::spawn(move || thread_worker(thread_receiver)));
     }
@@ -141,4 +148,8 @@ fn end_of_message(buffer: &[u8]) -> bool {
         static ref END_OF_MESSAGE: Regex = Regex::new(r"\r\n\r\n").expect("Failed to create regex!");
     }
     END_OF_MESSAGE.is_match(buffer)
+}
+
+fn cpu_count() -> Arc<usize> {
+    CPU_COUNT.or_init_with(|| num_cpus::get().max(1))
 }

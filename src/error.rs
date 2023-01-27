@@ -66,17 +66,14 @@ impl From<TcpError> for IoError {
 
 impl From<IoError> for TcpError {
     fn from(value: IoError) -> Self {
-        match try_downcast_error(value) {
+        match try_downcast::<TcpError>(value) {
             Ok(error) => error,
             Err(other) => TcpError::Failed(other),
         }
     }
 }
 
-fn try_downcast_error<T>(error: IoError) -> Result<T, IoError>
-where
-    T: Error + Send + Sync + 'static,
-{
+fn try_downcast<T: Error + 'static>(error: IoError) -> Result<T, IoError> {
     match error.get_ref().map(|inner| inner.is::<T>()) {
         Some(true) => Ok(*error.into_inner().unwrap().downcast::<T>().unwrap()),
         _ => Err(error),
