@@ -106,6 +106,10 @@ impl TcpListener {
             }
         }
     }
+
+    pub fn local_addr(&self) -> Option<SocketAddr> {
+        self.listener.local_addr().ok()
+    }
 }
 
 impl Drop for TcpListener {
