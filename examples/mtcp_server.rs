@@ -73,8 +73,8 @@ fn main() {
                 match error {
                     TcpError::Cancelled=> error!("Accept operation was cancelled!"),
                     TcpError::TimedOut => error!("Accept operation timed out!"),
-                    TcpError::Incomplete => error!("Accept operation is incomplete!"),
                     TcpError::Failed(inner) => error!("Accept operation failed: {:?}", inner),
+                    TcpError::Incomplete | TcpError::TooBig => unreachable!(),
                 }
                 break; /*stop server after an error was encountered */
             },
@@ -110,12 +110,13 @@ fn thread_worker(receiver: Receiver<TcpConnection>) {
             }
             Err(_) => break, /* channel is closed */
         }
+        request_buffer.clear();
     }
 }
 
 fn handle_request(mut stream: TcpStream, buffer: &mut Vec<u8>, thread_id: ThreadId) {
     /* Read request */
-    match stream.read_all_timeout(buffer, Some(Duration::from_secs(15)), NonZeroUsize::new(4096), end_of_message) {
+    match stream.read_all_timeout(buffer, Some(Duration::from_secs(15)), NonZeroUsize::new(4096), NonZeroUsize::new(1048576), end_of_message) {
         Ok(_) => {
             let request_str = str::from_utf8(&buffer[..]).unwrap_or("invalid request!");
             info!("[{:?}] Request: {:?}", thread_id, request_str);
@@ -125,6 +126,7 @@ fn handle_request(mut stream: TcpStream, buffer: &mut Vec<u8>, thread_id: Thread
                 TcpError::Cancelled=> error!("Read operation was cancelled!"),
                 TcpError::TimedOut => error!("Read operation timed out!"),
                 TcpError::Incomplete => error!("Read operation is incomplete!"),
+                TcpError::TooBig => error!("Read operation failed, because request data is too big!"),
                 TcpError::Failed(inner) => error!("Read operation failed: {:?}", inner),
             }
             return;
@@ -139,11 +141,9 @@ fn handle_request(mut stream: TcpStream, buffer: &mut Vec<u8>, thread_id: Thread
             TcpError::TimedOut => error!("Write operation timed out!"),
             TcpError::Incomplete => error!("Write operation is incomplete!"),
             TcpError::Failed(inner) => error!("Write operation failed: {:?}", inner),
+            TcpError::TooBig => unreachable!(),
         }
     }
-
-    /* Clear the buffer for next time */
-    buffer.clear();
 }
 
 fn end_of_message(buffer: &[u8]) -> bool {

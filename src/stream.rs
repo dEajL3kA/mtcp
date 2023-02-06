@@ -50,6 +50,13 @@ pub struct TcpStream {
 }
 
 impl TcpStream {
+    /// Initialize a new `TcpStream` from an existing `TcpConnection` instance.
+    /// 
+    /// `TcpConnection` instances are usually obtained by
+    /// [`accept()`](crate::TcpListener::accept)ing incoming TCP connections
+    /// via a bound `TcpListener`.
+    /// 
+    /// The new `TcpStream` is tied to the specified `TcpManager` instance.
     pub fn from(manager: &Rc<TcpManager>, connection: TcpConnection) -> IoResult<Self> {
         let mut stream = connection.stream();
         let manager = manager.clone();
@@ -63,18 +70,24 @@ impl TcpStream {
         })
     }
 
+    /// Set up the *default* timeouts, to be used by functions like
+    /// [`Read::read()`](std::io::Read::read()) and
+    /// [`Write::write()`](std::io::Write::write()).
     pub fn set_default_timeouts(&mut self, timeout_rd: Option<Duration>, timeout_wr: Option<Duration>) {
         self.timeouts = (timeout_rd, timeout_wr);
     }
 
+    /// Get the *peer* socket address of this TCP stream.
     pub fn peer_addr(&self) -> Option<SocketAddr> {
         self.stream.peer_addr().ok()
     }
 
+    /// Get the *local* socket address of this TCP stream.
     pub fn local_addr(&self) -> Option<SocketAddr> {
         self.stream.local_addr().ok()
     }
 
+    /// Shuts down the read, write, or both halves of this TCP stream.
     pub fn shutdown(&self, how: Shutdown) -> IoResult<()> {
         self.stream.shutdown(how)
     }
@@ -101,6 +114,12 @@ impl TcpStream {
     // Connect functions
     // ~~~~~~~~~~~~~~~~~~~~~~~
 
+    /// Opens a new TCP connection to the remote host at the specified address.
+    /// 
+    /// An optional ***timeout*** can be specified, after which the operation
+    /// is going to fail, if the connection could **not** be established yet.
+    /// 
+    /// The new `TcpStream` is tied to the specified `TcpManager` instance.
     pub fn connect(manager: &Rc<TcpManager>, addr: SocketAddr, timeout: Option<Duration>) -> Result<Self, TcpError> {
         if manager.cancelled() {
             return Err(TcpError::Cancelled);
@@ -180,6 +199,23 @@ impl TcpStream {
     // Read functions
     // ~~~~~~~~~~~~~~~~~~~~~~~
 
+    /// Read the next "chunk" of incoming data from the TCP stream into the
+    /// specified destination buffer.
+    /// 
+    /// This function attempts to read a maximum of `buffer.len()` bytes, but
+    /// *fewer* bytes may actually be read! Specifically, the function waits
+    /// until *some* data become available for reading, or the end of the
+    /// stream (or an error) is encountered. It then reads as many bytes as are
+    /// available and returns immediately. The function does **not** wait any
+    /// longer, even if the `buffer` is **not** filled completely.
+    /// 
+    /// An optional ***timeout*** can be specified, after which the operation
+    /// is going to fail, if still **no** data is available for reading.
+    /// 
+    /// Returns the number of bytes that have been pulled from the stream into
+    /// the buffer, which is less than or equal to `buffer.len()`. A ***zero***
+    /// return value indicates the end of the stream. Otherwise, more data may
+    /// become available for reading soon!
     pub fn read_timeout(&mut self, buffer: &mut [u8], timeout: Option<Duration>) -> Result<usize, TcpError> {
         if self.manager.cancelled() {
             return Err(TcpError::Cancelled);
@@ -218,17 +254,45 @@ impl TcpStream {
         }
     }
 
-    pub fn read_all_timeout<F>(&mut self, buffer: &mut Vec<u8>, timeout: Option<Duration>, chunk_size: Option<NonZeroUsize>, fn_complete: F) -> Result<(), TcpError>
+    /// Read **all** incoming data from the TCP stream into the specified
+    /// destination buffer.
+    /// 
+    /// This function keeps on [reading](Self::read_timeout) from the stream,
+    /// until the input data has been read *completely*, as defined by the
+    /// `fn_complete` closure, or an error is encountered. All input data is
+    /// appended to the given `buffer`, extending the buffer as needed. The
+    /// `fn_complete` closure is invoked every time that a new "chuck" of input
+    /// was received. Unless the closure returned `true`, the function waits
+    /// for more input. If the end of the stream is encountered while the data
+    /// still is incomplete, the function fails.
+    /// 
+    /// The closure `fn_complete` takes a single parameter, a reference to the
+    /// current buffer, which contains *all* data that has been read so far.
+    /// That closure shall return `true` if and only if the data in the buffer
+    /// is considered "complete".
+    /// 
+    /// An optional ***timeout*** can be specified, after which the operation
+    /// is going to fail, if the data still is **not** complete.
+    ///
+    /// The optional ***chunk size*** specifies the maximum amount of data that
+    /// can be read in a [read](Self::read_timeout) operation.
+    /// 
+    /// An optional ***maximum length*** can be specified. If the total size
+    /// exceeds this limit *before* the data is complete, the function fails.
+    pub fn read_all_timeout<F>(&mut self, buffer: &mut Vec<u8>, timeout: Option<Duration>, chunk_size: Option<NonZeroUsize>, maximum_length: Option<NonZeroUsize>, fn_complete: F) -> Result<(), TcpError>
     where
         F: Fn(&[u8]) -> bool,
     {
-        let timeout = Timeout::start(timeout);
-        let chunk_size = chunk_size.map(NonZeroUsize::get).unwrap_or(4096);
+        let chunk_size = chunk_size.unwrap_or_else(|| NonZeroUsize::new(4096).unwrap());
         let mut valid_length = buffer.len();
 
         loop {
-            buffer.resize(compute_capacity(valid_length, chunk_size), 0);
-            let done = match self.read_timeout(&mut buffer[valid_length..], timeout.remaining_time()) {
+            let capacity = compute_capacity(valid_length, chunk_size, maximum_length);
+            if capacity <= valid_length {
+                return Err(TcpError::TooBig);
+            }
+            buffer.resize(capacity, 0);
+            let done = match self.read_timeout(&mut buffer[valid_length..], timeout) {
                 Ok(0) => Some(Err(TcpError::Incomplete)),
                 Ok(count) => {
                     valid_length += count;
@@ -263,6 +327,23 @@ impl TcpStream {
     // Write functions
     // ~~~~~~~~~~~~~~~~~~~~~~~
 
+    /// Write the next "chunk" of outgoing data from the specified source
+    /// buffer to the TCP stream.
+    /// 
+    /// This function attempts to write a maximum of `buffer.len()` bytes, but
+    /// *fewer* bytes may actually be written! Specifically, the function waits
+    /// until *some* data can be written, the stream is closed by the peer, or
+    /// an error is encountered. It then writes as many bytes as possible to
+    /// the stream. The function does **not** wait any longer, even if **not**
+    /// all data in `buffer` was **not** written yet.
+    /// 
+    /// An optional ***timeout*** can be specified, after which the operation
+    /// is going to fail, if still **no** data could be written.
+    /// 
+    /// Returns the number of bytes that have been pushed from the buffer into
+    /// the stream, which is less than or equal to `buffer.len()`. A ***zero***
+    /// return value indicates that the stream was closed. Otherwise, it may be
+    /// possible to write more data soon!
     pub fn write_timeout(&mut self, buffer: &[u8], timeout: Option<Duration>) -> Result<usize, TcpError> {
         if self.manager.cancelled() {
             return Err(TcpError::Cancelled);
@@ -301,11 +382,19 @@ impl TcpStream {
         }
     }
 
+    /// Write **all** outgoing data from the specified source buffer to the TCP
+    /// stream.
+    /// 
+    /// This function keeps on [writing](Self::write_timeout) to the stream,
+    /// until the output data has been written *completely*, the peer closes
+    /// the stream, or an error is encountered. If the stream is closed
+    /// *before* all data could be written, the function fails.
+    /// 
+    /// An optional ***timeout*** can be specified, after which the operation
+    /// is going to fail, if the data still was **not** written completely.
     pub fn write_all_timeout(&mut self, mut buffer: &[u8], timeout: Option<Duration>) -> Result<(), TcpError> {
-        let timeout = Timeout::start(timeout);
-
         loop {
-            match self.write_timeout(buffer, timeout.remaining_time()) {
+            match self.write_timeout(buffer, timeout) {
                 Ok(0) => return Err(TcpError::Incomplete),
                 Ok(count) => {
                     buffer = &buffer[count..];
@@ -360,10 +449,15 @@ fn into_io_result<T>(result: Result<T, TcpError>) -> IoResult<T> {
     }
 }
 
-fn compute_capacity(length: usize, chunk_size: usize) -> usize {
-    let padded_len = match length % chunk_size {
-        0 => length,
-        r => length.checked_add(chunk_size - r).expect("Numerical overflow!"),
-    };
-    padded_len.checked_add(chunk_size).expect("Numerical overflow!")
+fn compute_capacity(length: usize, chunk_size: NonZeroUsize, maximum_size: Option<NonZeroUsize>) -> usize {
+    let mut capacity = round_up(length, chunk_size);
+    capacity = capacity.checked_add(chunk_size.get()).expect("Numerical overflow!");
+    maximum_size.map(|maximum| capacity.min(round_up(maximum.get(), chunk_size))).unwrap_or(length)
+}
+
+fn round_up(value: usize, block_size: NonZeroUsize) -> usize {
+    match value % block_size.get() {
+        0 => value,
+        r => value.checked_add(block_size.get() - r).expect("Numerical overflow!"),
+    }
 }

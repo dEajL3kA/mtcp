@@ -26,8 +26,11 @@ pub enum TcpError {
     /// Indicates that the socket operation finished (usually because the
     /// stream was closed) before all data could be read or written.
     Incomplete,
-    /// Indicates that the socket operation failed. More detailed information
-    /// is available via the enclosed [`std::io::Error`](std::io::Error).
+    /// Indicates that the socket *read* operation was aborted, because the
+    /// length of the data would have exceeded the specified limit.
+    TooBig,
+    /// Indicates that the socket operation has failed. More detailed
+    /// information is available via the wrapped [`io::Error`](std::io::Error).
     Failed(IoError)
 }
 
@@ -39,6 +42,7 @@ impl Debug for TcpError {
             Self::Cancelled => write!(f, "TcpError::Cancelled"),
             Self::TimedOut => write!(f, "TcpError::TimedOut"),
             Self::Incomplete => write!(f, "TcpError::Incomplete"),
+            Self::TooBig => write!(f, "TcpError::TooBig"),
             Self::Failed(error) => write!(f, "TcpError::Failed({:?})", error),
         }
     }
@@ -50,6 +54,7 @@ impl Display for TcpError {
             Self::Cancelled => write!(f, "The TCP socket operation was cancelled!"),
             Self::TimedOut => write!(f, "The TCP socket operation timed out!"),
             Self::Incomplete => write!(f, "The TCP socket operation is incomplete!"),
+            Self::TooBig => write!(f, "The TCP socket operation aborted, data is too big!"),
             Self::Failed(error) => write!(f, "{}", error),
         }
     }

@@ -38,6 +38,9 @@ pub struct TcpListener {
 }
 
 impl TcpListener {
+    /// Creates a new `TcpListener` which will be bound to the specified socket address.
+    /// 
+    /// The new `TcpListener` is tied to the specified `TcpManager` instance.
     pub fn bind(manager: &Rc<TcpManager>, addr: SocketAddr) -> IoResult<Self> {
         let manager = manager.clone();
         let (listener, token) = Self::initialize(manager.context(), addr)?;
@@ -56,6 +59,10 @@ impl TcpListener {
         Ok((listener, token))
     }
 
+    /// Accept a new incoming TCP connection from this listener.
+    /// 
+    /// An optional ***timeout*** can be specified, after which the operation
+    /// is going to fail, if there is **no** incoming connection yet. 
     pub fn accept(&self, timeout: Option<Duration>) -> Result<TcpConnection, TcpError> {
         if self.manager.cancelled() {
             return Err(TcpError::Cancelled);
@@ -107,6 +114,7 @@ impl TcpListener {
         }
     }
 
+    /// Get the *local* socket address to which this `TcpListener` is bound.
     pub fn local_addr(&self) -> Option<SocketAddr> {
         self.listener.local_addr().ok()
     }

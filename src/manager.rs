@@ -49,14 +49,19 @@ pub(crate) struct TcpPollContext {
 }
 
 impl TcpManager {
+    /// Get the [thread-local](std::thread_local) *singleton* `TcpManager`
+    /// instance for the calling thread. The instance is created lazily for
+    /// each thread.
     pub fn instance() -> Result<Rc<Self>> {
         INSTANCE.with(|val| val.or_try_init_with(Self::new))
     }
 
+    /// Create a new `TcpManager` instance with *default* queue capacity.
     pub fn new() -> Result<Self> {
         Self::with_capacity(128)
     }
 
+    /// Create a new `TcpManager` instance with the specified queue capacity.
     pub fn with_capacity(capacity: usize) -> Result<Self> {
         let context = TcpPollContext::new(capacity)?;
         Ok(Self {
@@ -65,16 +70,27 @@ impl TcpManager {
         })
     }
 
+    /// Create a new [`mtcp_rs::TcpCanceller`](crate::TcpCanceller) instance
+    /// for this `TcpManager`.
     pub fn canceller(&self) -> Result<TcpCanceller> {
         self.cancelled
             .or_try_init_with(|| Ok(Flag::new(Waker::new(self.context().poll.registry(), SHUTDOWN)?)))
             .map(TcpCanceller::from)
     }
 
+    /// Check whether this `TcpManager` instance has been
+    /// [cancelled](crate::TcpCanceller::cancel) yet.
+    /// 
+    /// Returns `true`, if cancellation has been requested for this
+    /// `TcpManager`; or `false` otherwise.
     pub fn cancelled(&self) -> bool {
         self.cancelled.map(|flag| flag.check()).unwrap_or(false)
     }
 
+    /// Restart the `TcpManager`, i.e. clear its "cancellation" status.
+    /// 
+    /// Returns `true`, if the `TcpManager` was restarted successfully; or
+    /// `false`, if the `TcpManager` was **not** in a "cancelled" state.
     pub fn restart(&self) -> Result<bool> {
         self.cancelled.map(|flag| flag.clear()).unwrap_or(Ok(false))
     }

@@ -2,7 +2,8 @@
  * mtcp - TcpListener/TcpStream *with* timeout/cancellation support
  * This is free and unencumbered software released into the public domain.
  */
-use std::net::SocketAddr;
+use std::io::Result as IoResult;
+use std::net::{SocketAddr, Shutdown};
 
 use mio::net::TcpStream as MioTcpStream;
 
@@ -29,11 +30,18 @@ impl TcpConnection {
         self.stream
     }
 
+    /// Get the *peer* socket address of this TCP connection.
     pub fn peer_addr(&self) -> Option<SocketAddr> {
         self.stream.peer_addr().ok()
     }
 
+    /// Get the *local* socket address of this TCP connection.
     pub fn local_addr(&self) -> Option<SocketAddr> {
         self.stream.local_addr().ok()
+    }
+
+    /// Shuts down the read, write, or both halves of this TCP connection.
+    pub fn shutdown(&self, how: Shutdown) -> IoResult<()> {
+        self.stream.shutdown(how)
     }
 }

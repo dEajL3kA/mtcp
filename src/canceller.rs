@@ -37,10 +37,20 @@ impl TcpCanceller {
         }
     }
 
+    /// Request cancellation of any pending I/O operations belonging to the
+    /// tied `TcpManager` instance.
+    /// 
+    /// Returns `true`, if cancellation was requested successfully; or `false`,
+    /// if the tied `TcpManager` was already cancelled before.
     pub fn cancel(&self) -> Result<bool> {
         self.flag.raise()
     }
 
+    /// Check whether the tied `TcpManager` instance has been
+    /// [cancelled](Self::cancel) yet.
+    /// 
+    /// Returns `true`, if cancellation has been requested for the tied
+    /// `TcpManager`; or `false` otherwise.
     pub fn cancelled(&self) -> bool {
         self.flag.check()
     }

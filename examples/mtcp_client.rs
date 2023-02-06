@@ -60,8 +60,8 @@ fn connect(manager: &Rc<TcpManager>, ip_addr: std::net::IpAddr, hostname: &str) 
             match error {
                 TcpError::Cancelled=> error!("Connect operation was cancelled!"),
                 TcpError::TimedOut => error!("Connect operation timed out!"),
-                TcpError::Incomplete => error!("Connect operation is incomplete!"),
                 TcpError::Failed(inner) => error!("Connect operation failed: {:?}", inner),
+                TcpError::TooBig | TcpError::Incomplete => unreachable!(),
             }
             return;
         },
@@ -78,6 +78,7 @@ fn connect(manager: &Rc<TcpManager>, ip_addr: std::net::IpAddr, hostname: &str) 
                 TcpError::TimedOut => error!("Write operation timed out!"),
                 TcpError::Incomplete => error!("Write operation is incomplete!"),
                 TcpError::Failed(inner) => error!("Write operation failed: {:?}", inner),
+                TcpError::TooBig => unreachable!(),
             }
             return;
         },
@@ -86,12 +87,13 @@ fn connect(manager: &Rc<TcpManager>, ip_addr: std::net::IpAddr, hostname: &str) 
     // Read HTTP response
     info!("Reading HTTP response from server server...");
     let mut buffer = Vec::with_capacity(4096);
-    match stream.read_all_timeout(&mut buffer, Some(Duration::from_secs(15)), NonZeroUsize::new(4096), end_of_message) {
+    match stream.read_all_timeout(&mut buffer, Some(Duration::from_secs(15)), NonZeroUsize::new(4096), NonZeroUsize::new(1048576), end_of_message) {
         Ok(_) => info!("Response: {:?}", str::from_utf8(&buffer[..])),
         Err(error) => match error {
             TcpError::Cancelled=> error!("Read operation was cancelled!"),
             TcpError::TimedOut => error!("Read operation timed out!"),
             TcpError::Incomplete => error!("Read operation is incomplete!"),
+            TcpError::TooBig => error!("Read operation failed, because response data is too big!"),
             TcpError::Failed(inner) => error!("Read operation failed: {:?}", inner),
         },
     }
