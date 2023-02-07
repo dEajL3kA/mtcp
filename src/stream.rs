@@ -261,7 +261,7 @@ impl TcpStream {
     /// until the input data has been read *completely*, as defined by the
     /// `fn_complete` closure, or an error is encountered. All input data is
     /// appended to the given `buffer`, extending the buffer as needed. The
-    /// `fn_complete` closure is invoked every time that a new "chuck" of input
+    /// `fn_complete` closure is invoked every time that a new "chunk" of input
     /// was received. Unless the closure returned `true`, the function waits
     /// for more input. If the end of the stream is encountered while the data
     /// still is incomplete, the function fails.
@@ -275,7 +275,7 @@ impl TcpStream {
     /// is going to fail, if the data still is **not** complete.
     ///
     /// The optional ***chunk size*** specifies the maximum amount of data that
-    /// can be read in a [read](Self::read_timeout) operation.
+    /// can be [read](Self::read_timeout) at once.
     /// 
     /// An optional ***maximum length*** can be specified. If the total size
     /// exceeds this limit *before* the data is complete, the function fails.
@@ -284,14 +284,11 @@ impl TcpStream {
         F: Fn(&[u8]) -> bool,
     {
         let chunk_size = chunk_size.unwrap_or_else(|| NonZeroUsize::new(4096).unwrap());
+        let maximum_length = maximum_length.map(|value| NonZeroUsize::new(round_up(value.get(), chunk_size)).unwrap());
         let mut valid_length = buffer.len();
 
         loop {
-            let capacity = compute_capacity(valid_length, chunk_size, maximum_length);
-            if capacity <= valid_length {
-                return Err(TcpError::TooBig);
-            }
-            buffer.resize(capacity, 0);
+            adjust_buffer(buffer, valid_length, chunk_size, maximum_length)?;
             let done = match self.read_timeout(&mut buffer[valid_length..], timeout) {
                 Ok(0) => Some(Err(TcpError::Incomplete)),
                 Ok(count) => {
@@ -449,15 +446,24 @@ fn into_io_result<T>(result: Result<T, TcpError>) -> IoResult<T> {
     }
 }
 
-fn compute_capacity(length: usize, chunk_size: NonZeroUsize, maximum_size: Option<NonZeroUsize>) -> usize {
+fn adjust_buffer(buffer: &mut Vec<u8>, length: usize, chunk_size: NonZeroUsize, maximum_length: Option<NonZeroUsize>) -> Result<(), TcpError> {
     let mut capacity = round_up(length, chunk_size);
-    capacity = capacity.checked_add(chunk_size.get()).expect("Numerical overflow!");
-    maximum_size.map(|maximum| capacity.min(round_up(maximum.get(), chunk_size))).unwrap_or(length)
+    while capacity <= length {
+        capacity = capacity.checked_add(chunk_size.get()).expect("Numerical overflow!")
+    }
+    if capacity > buffer.len() {
+        if maximum_length.map_or(false, |max_len| capacity > max_len.get()) {
+            return Err(TcpError::TooBig);
+        }
+        buffer.resize(capacity, 0);
+    }
+    Ok(())
 }
 
 fn round_up(value: usize, block_size: NonZeroUsize) -> usize {
-    match value % block_size.get() {
+    let block_size = block_size.get();
+    match value % block_size {
         0 => value,
-        r => value.checked_add(block_size.get() - r).expect("Numerical overflow!"),
+        r => value.checked_add(block_size - r).expect("Numerical overflow!"),
     }
 }

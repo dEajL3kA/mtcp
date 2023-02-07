@@ -3,7 +3,7 @@
 
 [package]
 name = "mtcp-rs"
-version = "0.1.7"
+version = "0.1.8"
 edition = "2021"
 license-file = "LICENSE"
 description = "Provides a “blocking” implementation of TcpListener and TcpStream with proper timeout and cancellation support."
