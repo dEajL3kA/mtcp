@@ -332,7 +332,7 @@ impl TcpStream {
     /// until *some* data can be written, the stream is closed by the peer, or
     /// an error is encountered. It then writes as many bytes as possible to
     /// the stream. The function does **not** wait any longer, even if **not**
-    /// all data in `buffer` was **not** written yet.
+    /// all data in `buffer` could be written yet.
     /// 
     /// An optional ***timeout*** can be specified, after which the operation
     /// is going to fail, if still **no** data could be written.
