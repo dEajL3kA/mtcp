@@ -43,7 +43,7 @@ impl Debug for TcpError {
             Self::TimedOut => write!(f, "TcpError::TimedOut"),
             Self::Incomplete => write!(f, "TcpError::Incomplete"),
             Self::TooBig => write!(f, "TcpError::TooBig"),
-            Self::Failed(error) => write!(f, "TcpError::Failed({:?})", error),
+            Self::Failed(error) => write!(f, "TcpError::Failed({error})"),
         }
     }
 }
@@ -55,7 +55,7 @@ impl Display for TcpError {
             Self::TimedOut => write!(f, "The TCP socket operation timed out!"),
             Self::Incomplete => write!(f, "The TCP socket operation is incomplete!"),
             Self::TooBig => write!(f, "The TCP socket operation aborted, data is too big!"),
-            Self::Failed(error) => write!(f, "{}", error),
+            Self::Failed(error) => write!(f, "{error}"),
         }
     }
 }

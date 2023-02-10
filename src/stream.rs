@@ -14,7 +14,7 @@ use mio::net::TcpStream as MioTcpStream;
 
 use log::warn;
 
-use crate::utilities::Timeout;
+use crate::utilities::{Timeout, BufferManager};
 use crate::{TcpConnection, TcpManager, TcpError};
 use crate::manager::TcpPollContext;
 
@@ -284,26 +284,25 @@ impl TcpStream {
         F: Fn(&[u8]) -> bool,
     {
         let chunk_size = chunk_size.unwrap_or_else(|| NonZeroUsize::new(4096).unwrap());
-        let maximum_length = maximum_length.map(|value| NonZeroUsize::new(round_up(value.get(), chunk_size)).unwrap());
-        let mut valid_length = buffer.len();
+        if maximum_length.map_or(false, |value| value < chunk_size) {
+            panic!("maximum_length must be greater than or equal to chunk_size!")
+        }
+
+        let mut buffer = BufferManager::from(buffer, maximum_length);
 
         loop {
-            adjust_buffer(buffer, valid_length, chunk_size, maximum_length)?;
-            let done = match self.read_timeout(&mut buffer[valid_length..], timeout) {
-                Ok(0) => Some(Err(TcpError::Incomplete)),
+            let spare = buffer.alloc_spare_buffer(chunk_size);
+            match self.read_timeout(spare, timeout) {
+                Ok(0) => return Err(TcpError::Incomplete),
                 Ok(count) => {
-                    valid_length += count;
-                    match fn_complete(&buffer[..valid_length]) {
-                        true => Some(Ok(())),
-                        false => None,
+                    buffer.commit(count).map_err(|_err| TcpError::TooBig)?;
+                    match fn_complete(buffer.valid_data()) {
+                        true => return Ok(()),
+                        false => {},
                     }
                 },
-                Err(error) => Some(Err(error)),
+                Err(error) => return Err(error),
             };
-            if let Some(result) = done {
-                buffer.truncate(valid_length);
-                return result;
-            }
         }
     }
 
@@ -443,27 +442,5 @@ fn into_io_result<T>(result: Result<T, TcpError>) -> IoResult<T> {
     match result {
         Ok(value) => Ok(value),
         Err(error) => Err(error.into()),
-    }
-}
-
-fn adjust_buffer(buffer: &mut Vec<u8>, length: usize, chunk_size: NonZeroUsize, maximum_length: Option<NonZeroUsize>) -> Result<(), TcpError> {
-    let mut capacity = round_up(length, chunk_size);
-    while capacity <= length {
-        capacity = capacity.checked_add(chunk_size.get()).expect("Numerical overflow!")
-    }
-    if capacity > buffer.len() {
-        if maximum_length.map_or(false, |max_len| capacity > max_len.get()) {
-            return Err(TcpError::TooBig);
-        }
-        buffer.resize(capacity, 0);
-    }
-    Ok(())
-}
-
-fn round_up(value: usize, block_size: NonZeroUsize) -> usize {
-    let block_size = block_size.get();
-    match value % block_size {
-        0 => value,
-        r => value.checked_add(block_size - r).expect("Numerical overflow!"),
     }
 }
