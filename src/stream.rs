@@ -13,8 +13,9 @@ use mio::{Token, Interest};
 use mio::net::TcpStream as MioTcpStream;
 
 use log::warn;
+use spare_buffer::SpareBuffer;
 
-use crate::utilities::{Timeout, BufferManager};
+use crate::utilities::Timeout;
 use crate::{TcpConnection, TcpManager, TcpError};
 use crate::manager::TcpPollContext;
 
@@ -288,15 +289,15 @@ impl TcpStream {
             panic!("maximum_length must be greater than or equal to chunk_size!")
         }
 
-        let mut buffer = BufferManager::from(buffer, maximum_length);
+        let mut buffer = SpareBuffer::from(buffer, maximum_length);
 
         loop {
-            let spare = buffer.alloc_spare_buffer(chunk_size);
+            let spare = buffer.allocate_spare(chunk_size);
             match self.read_timeout(spare, timeout) {
                 Ok(0) => return Err(TcpError::Incomplete),
                 Ok(count) => {
                     buffer.commit(count).map_err(|_err| TcpError::TooBig)?;
-                    match fn_complete(buffer.valid_data()) {
+                    match fn_complete(buffer.data()) {
                         true => return Ok(()),
                         false => {},
                     }
